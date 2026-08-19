@@ -26,9 +26,10 @@ interface CrawlOutcome {
   errorMessage: string | null;
 }
 
-export function SourceManager({ initialSources }: { initialSources: SourceRow[] }) {
+// 목록은 서버 컴포넌트가 내려주는 prop을 그대로 읽는다. state로 복사하면 첫 마운트 값에
+// 고정돼 router.refresh() 후에도 화면이 갱신되지 않는다 (수집 후 "최근 수집"이 안 바뀌던 원인).
+export function SourceManager({ initialSources: sources }: { initialSources: SourceRow[] }) {
   const router = useRouter();
-  const [sources] = useState(initialSources);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
