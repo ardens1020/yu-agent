@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { AdminBackButton } from "./AdminBackButton";
 import { AdminLogoutButton } from "./AdminLogoutButton";
 
 const NAV = [
@@ -16,6 +17,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
     <>
       <header className="border-b border-border bg-surface">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
+          <AdminBackButton />
           <Link href="/admin" className="font-bold whitespace-nowrap">
             관리자 <span className="text-accent">콘솔</span>
           </Link>
