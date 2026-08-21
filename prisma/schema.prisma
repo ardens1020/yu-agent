@@ -135,12 +135,15 @@ model Notification {
   userId    String
   noticeId  String
   reason    String
+  /// 알림 종류: MATCH(관심/키워드 매칭) | DEADLINE_D3 | DEADLINE_D1 | DEADLINE_D0
+  /// 저장 공지 마감 알림은 시점마다 별도 알림이라 (userId,noticeId)만으로는 구분되지 않는다.
+  kind      String   @default("MATCH")
   isRead    Boolean  @default(false)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   notice    Notice   @relation(fields: [noticeId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
-  @@unique([userId, noticeId])
+  @@unique([userId, noticeId, kind])
   @@index([userId, isRead])
 }
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { NotificationBell } from "./NotificationBell";
 import { LogoutButton } from "./LogoutButton";
 import { prisma } from "@/lib/db";
+import { ensureDeadlineNotifications } from "@/lib/notify";
 import type { SessionUser } from "@/lib/session";
 
 const NAV = [
@@ -12,7 +13,8 @@ const NAV = [
 ];
 
 export async function Header({ user }: { user: SessionUser | null }) {
-  // 안 읽은 알림 개수는 서버에서 세어 초기 렌더에 바로 표시한다.
+  // 저장 공지 마감 알림(D-3/D-1/당일)을 먼저 갱신한 뒤 미읽음 개수를 센다.
+  if (user) await ensureDeadlineNotifications(user.id);
   const unread = user
     ? await prisma.notification.count({ where: { userId: user.id, isRead: false } })
     : 0;

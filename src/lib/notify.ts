@@ -3,6 +3,50 @@ import { INTEREST_MAP, interestLabel } from "./taxonomy";
 import { scoreNotice } from "./recommend";
 import { noticeToScorable } from "./notice-mapper";
 
+/** KST 자정 기준 날짜 차이. 마감(23:59:59 KST)이 오늘이면 0, 사흘 뒤면 3. */
+function kstDayDiff(deadline: Date, now: Date): number {
+  const key = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+  const midnight = (d: Date) => new Date(`${key(d)}T00:00:00Z`).getTime();
+  return Math.round((midnight(deadline) - midnight(now)) / 86_400_000);
+}
+
+// 마감까지 남은 일수 → 알림 종류·문구. 이 세 시점에만 알림을 만든다.
+const DEADLINE_STAGES: Record<number, { kind: string; reason: string }> = {
+  3: { kind: "DEADLINE_D3", reason: "저장한 공지 마감 D-3" },
+  1: { kind: "DEADLINE_D1", reason: "저장한 공지 마감 D-1" },
+  0: { kind: "DEADLINE_D0", reason: "저장한 공지 오늘 마감" },
+};
+
+/**
+ * 저장 공지 중 마감이 D-3·D-1·당일인 것에 알림을 만든다.
+ * 별도 스케줄러 없이, 헤더가 미읽음 개수를 셀 때(=사용자가 앱을 쓸 때) 호출한다.
+ * 같은 (userId, noticeId, kind)는 unique라 하루에 여러 번 호출돼도 한 번만 생긴다.
+ */
+export async function ensureDeadlineNotifications(userId: string): Promise<void> {
+  const saved = await prisma.savedNotice.findMany({
+    where: { userId, notice: { isHidden: false, deadlineAt: { not: null } } },
+    select: { noticeId: true, notice: { select: { deadlineAt: true } } },
+  });
+  if (saved.length === 0) return;
+
+  const now = new Date();
+  const wanted: Array<{ userId: string; noticeId: string; kind: string; reason: string }> = [];
+  for (const row of saved) {
+    const stage = DEADLINE_STAGES[kstDayDiff(row.notice.deadlineAt!, now)];
+    if (stage) wanted.push({ userId, noticeId: row.noticeId, ...stage });
+  }
+  if (wanted.length === 0) return;
+
+  // SQLite/libSQL은 createMany의 skipDuplicates를 못 쓰므로 기존 알림을 먼저 걸러낸다.
+  const existing = await prisma.notification.findMany({
+    where: { userId, noticeId: { in: wanted.map((w) => w.noticeId) }, kind: { startsWith: "DEADLINE_" } },
+    select: { noticeId: true, kind: true },
+  });
+  const seen = new Set(existing.map((e) => `${e.noticeId}|${e.kind}`));
+  const fresh = wanted.filter((w) => !seen.has(`${w.noticeId}|${w.kind}`));
+  if (fresh.length > 0) await prisma.notification.createMany({ data: fresh });
+}
+
 /**
  * 새로 수집된 공지를 알림 기준과 매칭해 Notification을 만든다.
  * 유저플로우 n35(웹 내 알림 목록)용 — 이메일/푸시는 범위 밖.
