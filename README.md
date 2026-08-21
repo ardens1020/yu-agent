@@ -29,6 +29,8 @@ npm run dev                          # http://localhost:3000
 | `ADMIN_PASSWORD` | ✅ | 관리자 로그인 비밀번호 |
 | `ANTHROPIC_API_KEY` | — | 없으면 AI 요약을 건너뛰고 본문 발췌로 폴백 |
 | `ANTHROPIC_MODEL` | — | 기본 `claude-opus-5` |
+| `TURSO_DATABASE_URL` | 배포 시 ✅ | 있으면 `DATABASE_URL`보다 우선한다. Vercel에서는 없으면 부팅 시 에러 |
+| `TURSO_AUTH_TOKEN` | 배포 시 ✅ | Turso DB 토큰 |
 
 `prisma migrate` / CLI 스크립트는 `.env`의 `DATABASE_URL`을 읽는다(Prisma 7은 `.env`를 자동 로드하지 않아 `prisma.config.ts`에서 명시적으로 읽는다).
 
@@ -127,9 +129,70 @@ npx tsx src/scripts/enrich.ts --collect <id> # 배치 결과 반영
 | `npx tsx src/scripts/inspect.ts` | 수집 결과 점검 |
 | `npx tsx src/scripts/recrawl-source.ts --source <경로>` | 특정 출처 삭제 후 재수집 (파서 수정 후) |
 
+## 배포 (Vercel + Turso)
+
+서버리스 파일시스템은 휘발성이라 SQLite 파일을 쓸 수 없다. 배포에서는 같은 SQLite를
+**Turso**(libSQL)에 올려 쓴다. 어댑터는 `@prisma/adapter-libsql` 하나로 로컬 파일과
+Turso를 모두 처리하므로 코드 변경은 없다 (`src/lib/db.ts`).
+
+### 1. 로컬에서 DB를 먼저 완성한다
+
+위 "빠른 시작"을 그대로 실행해 `dev.db`에 출처·공지가 들어간 상태를 만든다.
+Turso DB는 이 파일을 그대로 복제해 만드는 게 가장 쉽다.
+
+### 2. Turso DB 만들기 (본인 계정)
+
+```bash
+curl -sSfL https://get.tur.so/install.sh | bash   # Windows는 scoop install turso
+turso auth signup            # 또는 turso auth login
+turso db create yu-agent --from-file dev.db
+turso db show yu-agent --url         # → TURSO_DATABASE_URL
+turso db tokens create yu-agent      # → TURSO_AUTH_TOKEN
+```
+
+이미 빈 DB를 만들어버렸다면 `--from-file`을 다시 쓸 수 없다.
+그때만 `.env.local`에 위 두 값을 넣고 `npx tsx src/scripts/push-to-turso.ts`로 옮긴다.
+
+### 3. Vercel 배포 (본인 계정)
+
+`.vercel/`은 gitignore 대상이라 저장소에 없다. 각자 자기 계정으로 새로 연결한다.
+
+1. GitHub에 저장소를 올리고 [vercel.com/new](https://vercel.com/new)에서 import (Framework: Next.js, 설정 그대로).
+2. Environment Variables에 등록 — `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`,
+   `SESSION_SECRET`, `ADMIN_PASSWORD`, (선택) `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`.
+   `DATABASE_URL`은 넣지 않는다.
+3. Deploy. 리전은 `vercel.json`에서 서울(`icn1`)로 고정돼 있다.
+
+CLI로 하려면 `npm i -g vercel && vercel link && vercel --prod`.
+
+### 4. 배포 후 공지 수집
+
+- 관리자 화면 `/admin/sources`의 "수동 수집" — 게시판 1~2개씩. 서버리스 실행 시간 제한이
+  있어 전체 수집은 타임아웃될 수 있다.
+- 권장: `.env.local`에 `TURSO_*`를 채우고 **로컬에서** 스크립트를 돌린다.
+  `db.ts`가 `TURSO_DATABASE_URL`을 우선하므로 그대로 운영 DB에 쓰인다.
+
+  ```bash
+  npx tsx src/scripts/crawl.ts --pages 2
+  npx tsx src/scripts/extract-heuristics.ts
+  npx tsx src/scripts/enrich.ts --batch    # AI 요약 (API 키 필요)
+  ```
+
+  이때 `npm run dev`도 Turso를 보게 된다. 로컬 DB로 돌아가려면 두 변수를 다시 주석 처리한다.
+
+## 인수인계 체크리스트
+
+- [ ] 저장소 접근 — GitHub Collaborator 초대(Settings → Collaborators) 또는 fork
+- [ ] `npm install` → `npx prisma migrate dev` → `npm run dev`로 로컬 실행 확인
+- [ ] `SESSION_SECRET`, `ADMIN_PASSWORD`는 새 값으로 생성 (이전 값 재사용 금지)
+- [ ] `ANTHROPIC_API_KEY`는 본인 [콘솔](https://console.anthropic.com) 키 발급 (없어도 동작)
+- [ ] Turso DB·Vercel 프로젝트를 본인 계정으로 새로 생성 (위 배포 절차)
+- [ ] 이전 배포는 필요 없어지면 삭제, 이전 Turso 토큰은 `turso db tokens invalidate`로 폐기
+- [ ] `REBUILD.md`의 "절대 다시 만들면 안 되는 버그" 절 읽기 — 실제 데이터로 잡은 버그 목록
+
 ## 기술 스택
 
-Next.js 16 (App Router) · TypeScript · Tailwind CSS v4 · Prisma 7 + SQLite (better-sqlite3 어댑터) · cheerio · Anthropic SDK
+Next.js 16 (App Router) · TypeScript · Tailwind CSS v4 · Prisma 7 + SQLite/libSQL (`@prisma/adapter-libsql` — 로컬 파일과 Turso 공용) · cheerio · Anthropic SDK
 
 ## 알아둘 점
 

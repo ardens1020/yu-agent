@@ -48,8 +48,8 @@
 | tailwindcss | 4.3.3 | v4 — `@import "tailwindcss"` 방식 |
 | @tailwindcss/postcss | 4.3.3 | |
 | prisma / @prisma/client | 7.9.1 | **v7은 스키마에 `url`을 못 쓴다** (아래 참고) |
-| @prisma/adapter-better-sqlite3 | 7.9.1 | v7은 드라이버 어댑터가 필수 |
-| better-sqlite3 | 12.11.1 | 네이티브 모듈 — Windows 주의 대상 |
+| @prisma/adapter-libsql | 7.9.1 | v7은 드라이버 어댑터가 필수 |
+| @libsql/client | 0.17.4 | 순수 JS. 로컬 파일과 Turso를 같은 어댑터로 처리 |
 | cheerio | 1.2.0 | HTML 파싱 |
 | @anthropic-ai/sdk | 0.117.1 | AI 요약 |
 | zod | 4.4.3 | 구조화 출력 스키마 |
@@ -60,25 +60,12 @@
 
 ## 3. Windows 환경 준비 (여기서 막히는 경우가 가장 많다)
 
-### 3-1. better-sqlite3 네이티브 빌드
+### 3-1. DB 드라이버 — 네이티브 빌드 없음
 
-`better-sqlite3`는 네이티브 모듈이다. 보통 Windows x64용 **prebuilt 바이너리**를 받아서
-그냥 설치되지만(`prebuild-install`), 실패하면 `node-gyp rebuild`로 넘어가고 그때는 빌드 도구가 필요하다.
-
-먼저 그냥 설치를 시도하고, 실패했을 때만 아래를 설치한다:
-
-```powershell
-# 실패 시에만
-winget install Microsoft.VisualStudio.2022.BuildTools
-# 설치 관리자에서 "C++를 사용한 데스크톱 개발" 워크로드 선택
-winget install Python.Python.3.12
-```
-
-설치 후 `npm rebuild better-sqlite3`로 재시도한다.
-
-> **prebuilt를 못 받는 상황이 반복되면** `@prisma/adapter-better-sqlite3` 대신
-> `@prisma/adapter-libsql` + `@libsql/client`(순수 JS, 네이티브 빌드 없음)로 바꾸는 것을 고려한다.
-> 다만 원본은 better-sqlite3로 검증됐으므로 먼저 이쪽을 시도하라.
+초기엔 `better-sqlite3`(네이티브 모듈)를 썼지만 지금은 `@prisma/adapter-libsql` +
+`@libsql/client`를 쓴다. **순수 JS라 Windows 빌드 도구(VS Build Tools·Python)가 필요 없다.**
+같은 어댑터가 `file:./dev.db`와 `libsql://...`(Turso)를 모두 처리하므로 배포 시 코드 변경도 없다.
+배포 절차는 `README.md`의 "배포 (Vercel + Turso)" 참고.
 
 ### 3-2. npm의 install script 차단 (npm 11)
 
@@ -88,11 +75,10 @@ winget install Python.Python.3.12
 npm warn allow-scripts N packages have install scripts not yet covered by allowScripts
 ```
 
-**Prisma와 better-sqlite3는 install script가 반드시 실행돼야 한다.** 승인한다:
+**Prisma는 install script가 반드시 실행돼야 한다.** 승인한다:
 
 ```powershell
 npm approve-scripts prisma @prisma/engines esbuild unrs-resolver
-npm approve-scripts better-sqlite3
 ```
 
 승인 결과는 `package.json`의 `allowScripts`에 기록된다. 원본의 최종 상태:
@@ -103,7 +89,6 @@ npm approve-scripts better-sqlite3
   "@prisma/engines@7.9.1": true,
   "esbuild@0.28.2": true,
   "unrs-resolver@1.12.2": true,
-  "better-sqlite3@12.11.1": true,
   "fsevents@2.3.3": true
 }
 ```
@@ -139,9 +124,9 @@ DATABASE_URL="file:./dev.db"
 ```powershell
 npx create-next-app@latest yu-agent --typescript --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --no-turbopack --yes
 cd yu-agent
-npm i prisma @prisma/client @prisma/adapter-better-sqlite3 cheerio @anthropic-ai/sdk zod
+npm i prisma @prisma/client @prisma/adapter-libsql @libsql/client cheerio @anthropic-ai/sdk zod
 npm i -D tsx
-npm approve-scripts prisma @prisma/engines esbuild unrs-resolver better-sqlite3
+npm approve-scripts prisma @prisma/engines esbuild unrs-resolver
 npx prisma --version    # 여기서 성공해야 다음 단계로 간다
 ```
 
@@ -159,6 +144,9 @@ SESSION_SECRET="변경하세요-임의의-긴-문자열"
 ADMIN_PASSWORD="yuadmin"
 # ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_MODEL="claude-opus-5"
+# 배포용 (Turso). 채우면 로컬에서도 dev.db 대신 Turso를 쓴다.
+# TURSO_DATABASE_URL=libsql://...
+# TURSO_AUTH_TOKEN=...
 ```
 
 `.gitignore`에 추가:
@@ -191,8 +179,10 @@ generator client {
 import path from "node:path";
 import { defineConfig, env } from "prisma/config";
 
-// Prisma 7은 .env를 자동으로 읽지 않는다.
-process.loadEnvFile?.(path.join(process.cwd(), ".env"));
+// Prisma 7은 .env를 자동으로 읽지 않는다. Vercel 빌드에는 .env가 없으므로 없으면 넘어간다.
+try { process.loadEnvFile?.(path.join(process.cwd(), ".env")); } catch {}
+// 빌드가 쓰는 건 `prisma generate`뿐이라 DB 주소가 필요 없다. 비어 있으면 기본값으로 채워 빌드를 멈추지 않게 한다.
+process.env.DATABASE_URL ||= "file:./dev.db";
 
 export default defineConfig({
   schema: path.join("prisma", "schema.prisma"),
@@ -203,22 +193,34 @@ export default defineConfig({
 
 `process.loadEnvFile`을 빼면 `Cannot resolve environment variable: DATABASE_URL`로 실패한다.
 
-클라이언트는 어댑터를 넘겨 만든다. **클래스명은 `PrismaBetterSqlite3`다** (`SQLite` 아님):
+클라이언트는 어댑터를 넘겨 만든다. libSQL 어댑터 하나가 로컬 파일과 Turso를 모두 처리한다.
+생성은 **지연**시켜야 한다 — 모듈 최상단에서 만들면 `next build`의 라우트 수집 단계에서도
+실행돼 빌드 환경에 DB 환경변수가 없으면 빌드가 깨진다. 실제 구현은 `src/lib/db.ts` 참고:
 
 ```ts
-// src/lib/db.ts
 import { PrismaClient } from "@/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaLibSql } from "@prisma/adapter-libsql";
 
-const url = process.env.DATABASE_URL ?? "file:./dev.db";
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-
-function createClient() {
-  return new PrismaClient({ adapter: new PrismaBetterSqlite3({ url }) });
+function createClient(): PrismaClient {
+  // 빈 문자열도 미설정으로 본다. `??`는 ""를 통과시켜 URL_INVALID로 늦게 터진다.
+  const url = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL || "file:./dev.db";
+  if (process.env.VERCEL && url.startsWith("file:")) {
+    // 서버리스 파일시스템은 휘발성이라 빈 DB가 만들어지고 모든 쿼리가 실패한다.
+    throw new Error("TURSO_DATABASE_URL이 비어 있다.");
+  }
+  return new PrismaClient({
+    adapter: new PrismaLibSql({ url, authToken: process.env.TURSO_AUTH_TOKEN || undefined }),
+  });
 }
 
-export const prisma = globalForPrisma.prisma ?? createClient();
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+let client: PrismaClient | undefined;
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_t, prop) {
+    client ??= createClient();
+    const value = Reflect.get(client, prop);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});
 ```
 
 CLI 스크립트용 환경변수 로더도 따로 필요하다 (`src/lib/load-env.ts`):
