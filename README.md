@@ -190,6 +190,17 @@ CLI로 하려면 `npm i -g vercel && vercel link && vercel --prod`.
 - [ ] 이전 배포는 필요 없어지면 삭제, 이전 Turso 토큰은 `turso db tokens invalidate`로 폐기
 - [ ] `REBUILD.md`의 "절대 다시 만들면 안 되는 버그" 절 읽기 — 실제 데이터로 잡은 버그 목록
 
+## 문서
+
+| 파일 | 용도 |
+|---|---|
+| `README.md` | 실행·환경변수·동작 원리·배포 |
+| `REBUILD.md` | 코드 없이 처음부터 다시 만들 때의 지침 (데이터 모델·CMS 구조·재발 금지 버그) |
+| `UI.md` | 화면 스펙 — 디자인 토큰·공통 컴포넌트 원본 코드·화면별 문구 |
+
+`REBUILD.md` + `UI.md`만 있으면 코드 없이도 같은 서비스를 다시 만들 수 있게 유지한다.
+**코드를 고치고 화면 문구나 공통 컴포넌트가 바뀌면 `UI.md`도 같이 고쳐라** — 안 그러면 두 문서가 거짓말을 한다.
+
 ## 기술 스택
 
 Next.js 16 (App Router) · TypeScript · Tailwind CSS v4 · Prisma 7 + SQLite/libSQL (`@prisma/adapter-libsql` — 로컬 파일과 Turso 공용) · cheerio · Anthropic SDK
