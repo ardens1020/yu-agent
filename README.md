@@ -203,6 +203,7 @@ turso db shell <db> < prisma/migrations/<새폴더>/migration.sql   # 2. Turso�
 | 증상 | 원인·해결 |
 |---|---|
 | 배포 후 모든 페이지가 500 | `TURSO_DATABASE_URL`이 비었다. `db.ts`가 일부러 즉시 던진다 — 조용히 빈 DB를 쓰는 것보다 낫다. Vercel 환경변수 등록 후 **재배포**(환경변수 변경은 자동 반영되지 않는다) |
+| 배포에서 로그인·관리자 로그인이 500 | `SESSION_SECRET` 또는 `ADMIN_PASSWORD`가 비었다. `session.ts`가 프로덕션에서만 던진다 — 기본값(`yuadmin`)은 코드에 있으므로 저장소가 공개되면 곧 공개된 비밀번호다. 로컬(`npm run dev`)에서는 기본값이 그대로 동작한다 |
 | 로컬은 되는데 배포만 데이터가 없음 | 로컬은 `dev.db`, 배포는 Turso다. 수집 스크립트를 `TURSO_*` 채운 상태로 다시 돌린다 |
 | `no such column` / `no such table` | 위 §5의 2번을 빠뜨렸다 |
 | 배포 후 전원 재로그인 | `SESSION_SECRET`을 바꾸면 기존 서명 쿠키가 전부 무효다. 정상이다 |

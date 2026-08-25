@@ -6,8 +6,22 @@ const STUDENT_COOKIE = "yu_session";
 const ADMIN_COOKIE = "yu_admin";
 const MAX_AGE = 60 * 60 * 24 * 30; // 30일
 
+/**
+ * 프로덕션에서 시크릿 폴백은 곧 "공개된 비밀번호"다 (저장소가 공개면 더더욱).
+ * 조용히 기본값으로 도는 것보다 부팅/요청 시점에 터지는 게 낫다. `db.ts`와 같은 원칙.
+ * 빈 문자열 환경변수도 미설정으로 본다 — `??`면 빈 비밀번호가 그대로 통과한다.
+ */
+function requiredSecret(name: "SESSION_SECRET" | "ADMIN_PASSWORD", devFallback: string): string {
+  const value = process.env[name];
+  if (value) return value;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(`${name}가 설정되지 않았다. 배포 환경변수에 등록하고 재배포하라.`);
+  }
+  return devFallback;
+}
+
 function secret(): string {
-  return process.env.SESSION_SECRET || "yu-agent-dev-secret";
+  return requiredSecret("SESSION_SECRET", "yu-agent-dev-secret");
 }
 
 function sign(value: string): string {
@@ -109,8 +123,7 @@ export async function isAdmin(): Promise<boolean> {
 }
 
 export function checkAdminPassword(input: string): boolean {
-  // `??`면 빈 문자열 환경변수가 그대로 통과해 "빈 비밀번호로 관리자 로그인"이 된다.
-  const expected = process.env.ADMIN_PASSWORD || "yuadmin";
+  const expected = requiredSecret("ADMIN_PASSWORD", "yuadmin");
   if (input.length !== expected.length) return false;
   try {
     return timingSafeEqual(Buffer.from(input), Buffer.from(expected));
