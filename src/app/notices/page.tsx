@@ -43,8 +43,9 @@ export default async function NoticesPage({
   const [sources, list, recommended] = await Promise.all([
     listSources(),
     listNotices({ ...query, perPage: 20 }),
-    // 필터·검색 중에는 추천 섹션을 감춘다 (사용자가 지금 찾는 것에 집중하도록).
-    isFiltering ? Promise.resolve([]) : recommendNotices(user, { limit: 6 }),
+    // 검색·필터 중에도 추천을 보여준다. 단 후보를 그 조건 안으로 좁혀서
+    // "검색 결과 중 나에게 맞는 것"과 "전체 결과"가 나뉘어 보이게 한다.
+    recommendNotices(user, { limit: 6, ...(isFiltering ? { filter: query } : {}) }),
   ]);
 
   const savedIds = await getSavedIds(user.id, [
@@ -83,40 +84,46 @@ export default async function NoticesPage({
           />
         </Suspense>
 
-        {/* n14 AI 추천 공지 목록 */}
-        {!isFiltering ? (
-          <section>
-            <SectionTitle
-              title="나에게 맞는 공지"
-              description={
-                profileIncomplete
-                  ? "프로필을 채우면 추천 정확도가 올라갑니다."
-                  : `${user.grade}학년 · ${user.interests.map(interestLabel).join(", ")} 기준`
-              }
-              action={<LinkButton href="/profile" variant="ghost">프로필 수정</LinkButton>}
+        {/* n14 AI 추천 공지 목록 — 검색·필터 중에는 그 결과 안에서 추천한다 */}
+        <section>
+          <SectionTitle
+            title={isFiltering ? "이 중에서 나에게 맞는 공지" : "나에게 맞는 공지"}
+            description={
+              profileIncomplete
+                ? "프로필을 채우면 추천 정확도가 올라갑니다."
+                : `${user.grade}학년 · ${user.interests.map(interestLabel).join(", ")} 기준`
+            }
+            action={<LinkButton href="/profile" variant="ghost">프로필 수정</LinkButton>}
+          />
+          {profileIncomplete && recommended.length === 0 ? (
+            <EmptyState
+              title="아직 추천할 기준이 없습니다."
+              description="학년과 관심 분야를 선택하면 그에 맞는 공지를 먼저 보여드립니다."
+              action={<LinkButton href="/profile" variant="primary">프로필 설정하기</LinkButton>}
             />
-            {profileIncomplete && recommended.length === 0 ? (
-              <EmptyState
-                title="아직 추천할 기준이 없습니다."
-                description="학년과 관심 분야를 선택하면 그에 맞는 공지를 먼저 보여드립니다."
-                action={<LinkButton href="/profile" variant="primary">프로필 설정하기</LinkButton>}
-              />
-            ) : (
-              <NoticeList
-                notices={recommended}
-                savedIds={savedIds}
-                showReasons
-                emptyTitle="조건에 맞는 추천 공지가 없습니다."
-                emptyDescription="관심 분야를 더 추가하거나 아래 통합 목록에서 직접 찾아보세요."
-              />
-            )}
-          </section>
-        ) : null}
+          ) : (
+            <NoticeList
+              notices={recommended}
+              savedIds={savedIds}
+              showReasons
+              emptyTitle={
+                isFiltering
+                  ? "이 결과 중에 프로필 조건에 맞는 공지는 없습니다."
+                  : "조건에 맞는 추천 공지가 없습니다."
+              }
+              emptyDescription={
+                isFiltering
+                  ? "아래 전체 결과에서 직접 확인해 보세요."
+                  : "관심 분야를 더 추가하거나 아래 통합 목록에서 직접 찾아보세요."
+              }
+            />
+          )}
+        </section>
 
         {/* n13 통합 공지 목록 / n23 필터링 결과 / n25 검색 결과 */}
         <section>
           <SectionTitle
-            title={query.q ? `"${query.q}" 검색 결과` : isFiltering ? "필터 결과" : "전체 공지"}
+            title={query.q ? `"${query.q}" 전체 검색 결과` : isFiltering ? "전체 필터 결과" : "전체 공지"}
             description={`${list.total.toLocaleString("ko-KR")}건${
               list.totalPages > 1 ? ` · ${list.page}/${list.totalPages}페이지` : ""
             }`}

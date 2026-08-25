@@ -113,14 +113,23 @@ export interface RecommendedItem extends NoticeView {
 /**
  * n14 AI 추천 공지 목록.
  * 최근 공지를 후보로 두고 규칙 기반 점수를 매긴다 (설명 가능한 추천 이유 포함).
+ *
+ * `filter`를 주면 그 조건(검색어·출처·기간 등)에 맞는 공지 안에서만 추천한다 —
+ * 검색 결과를 "나에게 맞는 것"과 "전체"로 나눠 보여주기 위함이다.
+ * 검색은 오래된 공지를 겨냥할 수 있으므로 이때는 최근 N일 제한을 걸지 않는다.
  */
 export async function recommendNotices(
   user: ScorableUser,
-  { limit = 8, candidateDays = 180 } = {},
+  { limit = 8, candidateDays = 180, filter }: { limit?: number; candidateDays?: number; filter?: NoticeQuery } = {},
 ): Promise<RecommendedItem[]> {
-  const since = new Date(Date.now() - candidateDays * 24 * 60 * 60 * 1000);
+  const where = filter
+    ? buildWhere(filter)
+    : {
+        isHidden: false,
+        publishedAt: { gte: new Date(Date.now() - candidateDays * 24 * 60 * 60 * 1000) },
+      };
   const rows = await prisma.notice.findMany({
-    where: { isHidden: false, publishedAt: { gte: since } },
+    where,
     select: NOTICE_SELECT,
     orderBy: { publishedAt: "desc" },
     take: 400,
