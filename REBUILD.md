@@ -10,6 +10,9 @@
 >
 > 코드를 그대로 옮길 수 있다면 이 문서로 재구축하지 말고 파일을 복사하는 게 정확하다.
 > 이 문서는 (a) 파일 없이 처음부터 만들 때, (b) 옮긴 코드를 이해·수정할 때 쓴다.
+>
+> **`UI.md`를 같이 읽어라.** 이 문서는 동작을, `UI.md`는 화면을 정의한다.
+> 원본과 같은 화면을 만들려면 `UI.md`의 공통 파일들을 그대로 옮기고 문구를 그대로 써야 한다.
 
 ---
 
@@ -48,8 +51,8 @@
 | tailwindcss | 4.3.3 | v4 — `@import "tailwindcss"` 방식 |
 | @tailwindcss/postcss | 4.3.3 | |
 | prisma / @prisma/client | 7.9.1 | **v7은 스키마에 `url`을 못 쓴다** (아래 참고) |
-| @prisma/adapter-better-sqlite3 | 7.9.1 | v7은 드라이버 어댑터가 필수 |
-| better-sqlite3 | 12.11.1 | 네이티브 모듈 — Windows 주의 대상 |
+| @prisma/adapter-libsql | 7.9.1 | v7은 드라이버 어댑터가 필수 |
+| @libsql/client | 0.17.4 | 순수 JS. 로컬 파일과 Turso를 같은 어댑터로 처리 |
 | cheerio | 1.2.0 | HTML 파싱 |
 | @anthropic-ai/sdk | 0.117.1 | AI 요약 |
 | zod | 4.4.3 | 구조화 출력 스키마 |
@@ -60,25 +63,12 @@
 
 ## 3. Windows 환경 준비 (여기서 막히는 경우가 가장 많다)
 
-### 3-1. better-sqlite3 네이티브 빌드
+### 3-1. DB 드라이버 — 네이티브 빌드 없음
 
-`better-sqlite3`는 네이티브 모듈이다. 보통 Windows x64용 **prebuilt 바이너리**를 받아서
-그냥 설치되지만(`prebuild-install`), 실패하면 `node-gyp rebuild`로 넘어가고 그때는 빌드 도구가 필요하다.
-
-먼저 그냥 설치를 시도하고, 실패했을 때만 아래를 설치한다:
-
-```powershell
-# 실패 시에만
-winget install Microsoft.VisualStudio.2022.BuildTools
-# 설치 관리자에서 "C++를 사용한 데스크톱 개발" 워크로드 선택
-winget install Python.Python.3.12
-```
-
-설치 후 `npm rebuild better-sqlite3`로 재시도한다.
-
-> **prebuilt를 못 받는 상황이 반복되면** `@prisma/adapter-better-sqlite3` 대신
-> `@prisma/adapter-libsql` + `@libsql/client`(순수 JS, 네이티브 빌드 없음)로 바꾸는 것을 고려한다.
-> 다만 원본은 better-sqlite3로 검증됐으므로 먼저 이쪽을 시도하라.
+초기엔 `better-sqlite3`(네이티브 모듈)를 썼지만 지금은 `@prisma/adapter-libsql` +
+`@libsql/client`를 쓴다. **순수 JS라 Windows 빌드 도구(VS Build Tools·Python)가 필요 없다.**
+같은 어댑터가 `file:./dev.db`와 `libsql://...`(Turso)를 모두 처리하므로 배포 시 코드 변경도 없다.
+배포 절차는 `README.md`의 "배포 (Vercel + Turso)" 참고.
 
 ### 3-2. npm의 install script 차단 (npm 11)
 
@@ -88,11 +78,10 @@ winget install Python.Python.3.12
 npm warn allow-scripts N packages have install scripts not yet covered by allowScripts
 ```
 
-**Prisma와 better-sqlite3는 install script가 반드시 실행돼야 한다.** 승인한다:
+**Prisma는 install script가 반드시 실행돼야 한다.** 승인한다:
 
 ```powershell
 npm approve-scripts prisma @prisma/engines esbuild unrs-resolver
-npm approve-scripts better-sqlite3
 ```
 
 승인 결과는 `package.json`의 `allowScripts`에 기록된다. 원본의 최종 상태:
@@ -103,7 +92,6 @@ npm approve-scripts better-sqlite3
   "@prisma/engines@7.9.1": true,
   "esbuild@0.28.2": true,
   "unrs-resolver@1.12.2": true,
-  "better-sqlite3@12.11.1": true,
   "fsevents@2.3.3": true
 }
 ```
@@ -139,9 +127,9 @@ DATABASE_URL="file:./dev.db"
 ```powershell
 npx create-next-app@latest yu-agent --typescript --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --no-turbopack --yes
 cd yu-agent
-npm i prisma @prisma/client @prisma/adapter-better-sqlite3 cheerio @anthropic-ai/sdk zod
+npm i prisma @prisma/client @prisma/adapter-libsql @libsql/client cheerio @anthropic-ai/sdk zod
 npm i -D tsx
-npm approve-scripts prisma @prisma/engines esbuild unrs-resolver better-sqlite3
+npm approve-scripts prisma @prisma/engines esbuild unrs-resolver
 npx prisma --version    # 여기서 성공해야 다음 단계로 간다
 ```
 
@@ -159,6 +147,9 @@ SESSION_SECRET="변경하세요-임의의-긴-문자열"
 ADMIN_PASSWORD="yuadmin"
 # ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_MODEL="claude-opus-5"
+# 배포용 (Turso). 채우면 로컬에서도 dev.db 대신 Turso를 쓴다.
+# TURSO_DATABASE_URL=libsql://...
+# TURSO_AUTH_TOKEN=...
 ```
 
 `.gitignore`에 추가:
@@ -191,8 +182,10 @@ generator client {
 import path from "node:path";
 import { defineConfig, env } from "prisma/config";
 
-// Prisma 7은 .env를 자동으로 읽지 않는다.
-process.loadEnvFile?.(path.join(process.cwd(), ".env"));
+// Prisma 7은 .env를 자동으로 읽지 않는다. Vercel 빌드에는 .env가 없으므로 없으면 넘어간다.
+try { process.loadEnvFile?.(path.join(process.cwd(), ".env")); } catch {}
+// 빌드가 쓰는 건 `prisma generate`뿐이라 DB 주소가 필요 없다. 비어 있으면 기본값으로 채워 빌드를 멈추지 않게 한다.
+process.env.DATABASE_URL ||= "file:./dev.db";
 
 export default defineConfig({
   schema: path.join("prisma", "schema.prisma"),
@@ -203,22 +196,34 @@ export default defineConfig({
 
 `process.loadEnvFile`을 빼면 `Cannot resolve environment variable: DATABASE_URL`로 실패한다.
 
-클라이언트는 어댑터를 넘겨 만든다. **클래스명은 `PrismaBetterSqlite3`다** (`SQLite` 아님):
+클라이언트는 어댑터를 넘겨 만든다. libSQL 어댑터 하나가 로컬 파일과 Turso를 모두 처리한다.
+생성은 **지연**시켜야 한다 — 모듈 최상단에서 만들면 `next build`의 라우트 수집 단계에서도
+실행돼 빌드 환경에 DB 환경변수가 없으면 빌드가 깨진다. 실제 구현은 `src/lib/db.ts` 참고:
 
 ```ts
-// src/lib/db.ts
 import { PrismaClient } from "@/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaLibSql } from "@prisma/adapter-libsql";
 
-const url = process.env.DATABASE_URL ?? "file:./dev.db";
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-
-function createClient() {
-  return new PrismaClient({ adapter: new PrismaBetterSqlite3({ url }) });
+function createClient(): PrismaClient {
+  // 빈 문자열도 미설정으로 본다. `??`는 ""를 통과시켜 URL_INVALID로 늦게 터진다.
+  const url = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL || "file:./dev.db";
+  if (process.env.VERCEL && url.startsWith("file:")) {
+    // 서버리스 파일시스템은 휘발성이라 빈 DB가 만들어지고 모든 쿼리가 실패한다.
+    throw new Error("TURSO_DATABASE_URL이 비어 있다.");
+  }
+  return new PrismaClient({
+    adapter: new PrismaLibSql({ url, authToken: process.env.TURSO_AUTH_TOKEN || undefined }),
+  });
 }
 
-export const prisma = globalForPrisma.prisma ?? createClient();
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+let client: PrismaClient | undefined;
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_t, prop) {
+    client ??= createClient();
+    const value = Reflect.get(client, prop);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});
 ```
 
 CLI 스크립트용 환경변수 로더도 따로 필요하다 (`src/lib/load-env.ts`):
@@ -305,19 +310,55 @@ for (const file of [".env", ".env.local"]) {
 
 ### 5-5. 출처 목록 (전부 HTTP 200 확인)
 
-| 이름 | listPath | boardNo | category | sortOrder |
-|---|---|---|---|---|
-| 화공 학부공지 | `/che/notice/notice.do` | 251 | DEPT | 1 |
-| 화공 학부게시판(선수강지도) | `/che/notice/bulletin-board.do` | 253 | DEPT | 2 |
-| 화공 장학안내 | `/che/notice/scholarship-guidance.do` | 1947 | SCHOLARSHIP | 3 |
-| 화공 현장실습공지 | `/che/notice/field-training-announcement.do` | 1948 | INTERNSHIP | 4 |
-| 화공 취업정보 | `/che/notice/employment.do` | 254 | CAREER | 5 |
-| 화공 대학원공지 | `/che/notice/graduate-school-announcement.do` | 671 | GRAD | 6 |
-| 영대소식(학교 전체) | `/main/intro/yu-news.do` | 5 | UNIV | 7 |
-| 학술·공연·행사 | `/main/intro/academic-performance-and-event.do` | 34 | EVENT | 8 |
+`.do` CMS 8개 + 학생성공처 3개 = **11개**. `deepPages`는 전집 수집 시 최대 목록 페이지 수(실측 총건수 기준).
 
-`siteId`는 경로의 첫 세그먼트(`che`, `main`)다.
+| 이름 | listPath | boardNo | category | 어댑터 | sortOrder | deepPages |
+|---|---|---|---|---|---|---|
+| 화공 학부공지 | `/che/notice/notice.do` | 251 | DEPT | YU_BOARD | 1 | 290 |
+| 화공 학부게시판(선수강지도) | `/che/notice/bulletin-board.do` | 253 | DEPT | YU_BOARD | 2 | 60 |
+| 화공 장학안내 | `/che/notice/scholarship-guidance.do` | 1947 | SCHOLARSHIP | YU_BOARD | 3 | 5 |
+| 화공 현장실습공지 | `/che/notice/field-training-announcement.do` | 1948 | INTERNSHIP | YU_BOARD | 4 | 40 |
+| 화공 취업정보 | `/che/notice/employment.do` | 254 | CAREER | YU_BOARD | 5 | 80 |
+| 화공 대학원공지 | `/che/notice/graduate-school-announcement.do` | 671 | GRAD | YU_BOARD | 6 | 40 |
+| 영대소식(학교 전체) | `/main/intro/yu-news.do` | 5 | UNIV | YU_BOARD | 7 | 300 |
+| 학술·공연·행사 | `/main/intro/academic-performance-and-event.do` | 34 | EVENT | YU_BOARD | 8 | 40 |
+| 학생성공처 기업 채용정보 | `/front_new/index.php?g_page=job&m_page=job01&view_key=all` | job01 | CAREER | JOIN_JOB | 9 | 10 |
+| 학생성공처 교내 추천채용 | `/front_new/index.php?g_page=job&m_page=job02` | job02 | CAREER | JOIN_JOB | 10 | 10 |
+| 학생성공처 진로취업 프로그램 | `/front_new/index.php?g_page=program&m_page=program01` | program01 | PROGRAM | JOIN_PROGRAM | 11 | 50 |
+
+`.do` 출처의 `siteId`는 경로의 첫 세그먼트(`che`, `main`), join 출처는 `join`.
 선택 확장: `/che/bk21/notice.do`(259, BK21 공지).
+
+### 5-6. 학생성공처(join.yu.ac.kr) — 완전히 다른 시스템
+
+`www.yu.ac.kr`과 **같은 파서를 쓸 수 없다.** PHP 기반이고, **목록은 공개지만 상세는 로그인이
+필요하다**(상세를 받으면 168바이트 "로그인 후 이용" 페이지가 온다). 그래서 상세를 아예 요청하지
+않고, 대신 목록이 주는 구조화 필드를 쓴다 — 마감일을 본문에서 추정할 필요가 없어 오히려 정확하다.
+
+그래서 크롤러를 **어댑터 구조**로 나눈다. `Source.adapter`(`YU_BOARD` | `JOIN_JOB` | `JOIN_PROGRAM`)와
+`Source.origin`으로 어느 어댑터를 쓸지 고른다. 공통 인터페이스는 `CrawlAdapter`:
+`fetchList(source, options)` 필수, `fetchDetail`은 **상세를 받을 수 없는 출처는 구현하지 않는다**
+(옵셔널 메서드로 두고 호출부에서 존재 여부를 확인한다). `pageSize`는 페이지네이션 계산용.
+
+**JOIN_JOB** (`act=job.comp.view&idx=N`)
+- 목록 `table.board_list`, 행마다 `a[href*="act=job.comp.view"]`의 `idx`가 `externalId`
+- `.do`와 같은 이유로 **컬럼은 `thead th` 라벨로 매핑한다** — 기업명/학원명, 모집분야/과목,
+  모집전공·지원자격, 지역, 접수기한/접수기간, 구분(상태)
+- 제목은 `기업명 — 모집분야`. 기업명이 비면 모집분야만 쓴다
+- **게시일 컬럼이 없다.** 현재 모집중인 것만 노출되므로 **처음 발견한 시각을 `publishedAt`으로 쓴다**
+  (upsert이므로 재수집해도 바뀌지 않는다)
+- 마감: `~ 2026-08-20` → 그 날짜의 KST 23:59:59. **`채용시`·`상시`·`수시`·`미정`은 마감 없음(null)**
+- 페이지를 넘기다 **새 항목이 0개면 중단**한다(같은 목록이 반복되는 경우가 있다)
+
+**JOIN_PROGRAM** (`act=view.new&P_IDX=N`)
+- 이 출처가 과거 이력의 핵심이다 — `programIng=end`에 종료 프로그램이 40여 페이지 남아 있다.
+  `in`(진행중) · `out`(교외) · `end`(종료) **세 목록을 모두 읽는다**
+- 마크업: `.program_list .program_con` (제목 `.pro_title`, 상태 `.pro_btn`, 기간 `.first_date .period`),
+  상단 고정은 `.top_notice li` (상태 기본값 `상시`, `isPinned: true`)
+- `.pro_btn`에는 `D-3`(`.deadline`)과 `HOT/NEW/BEST` 배지가 섞여 있다 → **떼어내고 상태만 남긴다**
+- `프로그램일자` → `eventStart`/`eventEnd`, `접수기간` → 마감(`deadlineAt`), `모집인원` → `structured.capacity`.
+  원본 문자열도 `structured.*Raw`에 보존한다
+- **게시일은 접수 시작일, 없으면 프로그램 시작일**을 쓴다
 
 > **주의: 이 구조는 2026-08-18 실측 기준이다.** 학교가 CMS를 바꾸면 셀렉터가 깨진다.
 > 구현 후 반드시 §10의 파서 검증을 실행해 실제 응답과 대조하라.
@@ -374,6 +415,17 @@ for (const file of [".env", ".env.local"]) {
    단순 안내(배부·휴진)에 마감을 붙이는 것을 막는 가장 효과적인 게이트다.
 
 결과: 165건 → 71건. **놓치는 건 늘지만 거짓 마감일보다 안전한 트레이드오프다.**
+
+이후 오탐을 늘리지 않고 추출률을 31%→47%로 올린 규칙 3개(`src/lib/extract.ts`, 테스트는
+`src/lib/extract.test.ts`):
+
+6. **본 공고의 기한을 가리키는 강한 표현**(`접수기간·신청기간·모집기간·접수기한·신청기한·제출기한`)이
+   하나라도 있으면 `까지`·`마감` 같은 약한 표현 구간은 **무시한다**. 한 공지 안에 하위 행사 마감
+   ("1:1 멘토링 모집기간: 3/13")이 섞여 있을 때 본 공고 마감을 고르는 기준이다.
+7. **제목에서는 `(~3/18)`처럼 물결표만 있는 표기도 마감으로 읽는다.** 제목은 작성자가 직접 정리한
+   문구라 신뢰도가 높다. **본문에서 같은 규칙을 쓰면 안 된다** — 행사 기간과 뒤섞여 오탐이 폭증한다.
+8. 두 날짜를 하나의 범위로 이을지는 **사이에 낀 문자로 판단한다** — `~`, `-`, 요일 괄호, 시각,
+   `부터`/`까지`뿐이면 범위, 다른 낱말이 끼면 별개 항목의 날짜다.
 
 ### 6-4. 대상학년 오탐 — 잘못된 학년은 추천에서 감점이라 해롭다
 
@@ -495,7 +547,9 @@ model Source {
   siteId        String                    // "che" | "main"
   boardNo       String
   listPath      String     @unique         // "/che/notice/notice.do" — 사실상 식별자
-  category      String                    // DEPT|GRAD|SCHOLARSHIP|INTERNSHIP|CAREER|UNIV|EVENT
+  category      String                    // DEPT|GRAD|SCHOLARSHIP|INTERNSHIP|CAREER|UNIV|EVENT|PROGRAM
+  adapter       String     @default("YU_BOARD")           // YU_BOARD|JOIN_JOB|JOIN_PROGRAM
+  origin        String     @default("https://www.yu.ac.kr") // join은 별개 시스템 §5-6
   isActive      Boolean    @default(true)
   sortOrder     Int        @default(0)
   lastCrawledAt DateTime?
@@ -523,9 +577,18 @@ model Notice {
   summary        String?                   // AI 요약
   aiTags         String    @default("[]")
   deadlineAt     DateTime?
+  deadlineSource String?                   // EXACT(구조화 필드)|ESTIMATED(본문 추정)|AI
   targetGrades   String    @default("[]")
   actionRequired Boolean   @default(false)
   enrichedAt     DateTime?                 // null이면 AI 요약 전
+  // join 출처에서만 채워지는 구조화 정보 §5-6
+  company        String?
+  recruitStatus  String?
+  eventStart     DateTime?
+  eventEnd       DateTime?
+  structured     String    @default("{}")
+  seriesId       String?                   // 반복 공지 묶음 (아래 NoticeSeries)
+  series         NoticeSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
   isHidden       Boolean   @default(false)
   adminNote      String?
   createdAt      DateTime  @default(now())
@@ -593,11 +656,13 @@ model Notification {
   userId    String
   noticeId  String
   reason    String            // "키워드 \"장학\"" 처럼 사람이 읽을 수 있는 근거
+  kind      String   @default("MATCH")  // MATCH|DEADLINE_D3|DEADLINE_D1|DEADLINE_D0
   isRead    Boolean  @default(false)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   notice    Notice   @relation(fields: [noticeId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
-  @@unique([userId, noticeId])
+  // 마감 알림은 시점마다 별개 알림이라 (userId,noticeId)만으로는 구분되지 않는다.
+  @@unique([userId, noticeId, kind])
   @@index([userId, isRead])
 }
 
@@ -625,6 +690,29 @@ model DuplicateCandidate {
   createdAt DateTime @default(now())
   @@unique([noticeAId, noticeBId])
   @@index([status])
+}
+
+/// 반복되는 공지 묶음(예: 매 학기 올라오는 장학사정 안내). 주기 분석·예측용.
+/// 스키마만 있고 채우는 코드는 아직 없다 — 없이 만들어도 전 기능이 동작한다.
+model NoticeSeries {
+  id                 String    @id @default(cuid())
+  key                String    @unique   // 연도·학기·회차를 지운 정규화 제목
+  label              String              // 사람이 읽을 대표 제목
+  occurrenceCount    Int       @default(0)
+  monthPattern       String    @default("[]")  // 게시된 월 예: [3,9]
+  medianIntervalDays Int?
+  intervalStdDays    Int?                // 간격 편차 — 예측 신뢰도 판단
+  firstSeenAt        DateTime?
+  lastSeenAt         DateTime?
+  nextExpectedFrom   DateTime?
+  nextExpectedTo     DateTime?
+  confidence         String    @default("LOW")
+  category           String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  notices            Notice[]
+  @@index([nextExpectedFrom])
+  @@index([confidence])
 }
 ```
 
@@ -654,9 +742,15 @@ src/
 │  ├─ notices.ts            목록·검색·추천 조회 (페이지와 API 공용)
 │  ├─ notice-mapper.ts      DB 행 → 화면 모델 + HTML 새니타이즈      ← §6-7
 │  ├─ crawler/
-│  │  ├─ sources.ts         출처 정의 + URL 빌더
-│  │  ├─ yu-board.ts        범용 파서 (목록·상세·첨부·날짜·해시)     ← §6-1, §6-2
-│  │  └─ run.ts             수집 실행 + CrawlRun 기록 + 추출 통합     ← §6-6
+│  │  ├─ sources.ts         출처 11개 정의 + URL 빌더
+│  │  ├─ run.ts             수집 실행 + CrawlRun 기록 + 추출 통합     ← §6-6
+│  │  └─ adapters/
+│  │     ├─ types.ts        CrawlAdapter/ParsedItem 공통 타입         ← §5-6
+│  │     ├─ index.ts        어댑터 레지스트리 (getAdapter)
+│  │     ├─ http.ts         fetchHtml·KST 날짜·squish·withQuery 공용
+│  │     ├─ yu-board.ts     .do CMS 범용 파서 (목록·상세·첨부·해시)   ← §6-1, §6-2
+│  │     ├─ join-job.ts     학생성공처 채용 (목록만)                  ← §5-6
+│  │     └─ join-program.ts 학생성공처 프로그램 (in/out/end)          ← §5-6
 │  └─ ai/
 │     ├─ client.ts          Anthropic 클라이언트 (키 없으면 null)
 │     ├─ enrich.ts          구조화 출력 요약 (순차)
@@ -737,6 +831,12 @@ src/
 - **키워드·관심분야가 둘 다 비어 있으면** 추천 점수 ≥ `minScore` → `추천 점수 72점`
 - 사유 최대 2개를 `, `로 이어 `reason`에 저장
 - 삽입 전 기존 알림 필터링 (§6-5)
+
+**저장 공지 마감 알림** — `ensureDeadlineNotifications(userId)`.
+저장한 공지의 마감이 **D-3 / D-1 / 당일**이면 `kind`를 `DEADLINE_D3` / `DEADLINE_D1` / `DEADLINE_D0`로
+알림을 만든다. **스케줄러가 없으므로 헤더가 미읽음 개수를 셀 때(=사용자가 화면을 열 때) 호출한다.**
+`(userId, noticeId, kind)` 유니크라 하루에 여러 번 호출돼도 한 번만 생긴다.
+D-2가 없는 것은 의도다 — 알림이 잦으면 무시하게 된다.
 
 ### 8-5. AI 요약 (`ai/`)
 
@@ -853,11 +953,13 @@ HMAC-SHA256 서명 쿠키. `value.signature` 형태, `timingSafeEqual`로 검증
 - 옵션: `httpOnly`, `sameSite: "lax"`, `secure`는 프로덕션만
 - `ADMIN_PASSWORD` 비교도 `timingSafeEqual` (길이 먼저 확인)
 
-### 디자인
+### 디자인 → `UI.md`
 
-Tailwind v4. CSS 변수로 라이트/다크 토큰 정의(`prefers-color-scheme`), `@theme inline`으로 매핑.
-`Noto_Sans_KR` 폰트, `word-break: keep-all`(한국어 줄바꿈).
-공지 원문 HTML용 `.notice-body` 스타일 별도 정의 — 넓은 표는 `overflow-x: auto` 컨테이너로 감싼다.
+**화면을 원본과 같게 만들려면 `UI.md`를 보라.** 토큰·공통 컴포넌트 원본 코드와 화면별 조립 순서,
+화면에 그대로 뜨는 문구가 거기 있다. 이 문서(REBUILD.md)만 보고 UI를 상상해서 만들면 다른 화면이 나온다.
+
+요약: Tailwind v4, CSS 변수로 라이트/다크 토큰 정의(`prefers-color-scheme`) + `@theme inline` 매핑,
+`Noto_Sans_KR`, `word-break: keep-all`, 공지 원문용 `.notice-body`(넓은 표는 `overflow-x: auto`).
 
 ---
 
@@ -967,13 +1069,14 @@ npx tsx src/scripts/enrich.ts --limit 5
 
 ## 11. 참고 파일
 
-- `README.md` — 사용자용 실행 안내
+- `UI.md` — **화면 스펙**(토큰·공통 컴포넌트 원본 코드·화면별 문구). UI는 이 문서가 기준이다
+- `README.md` — 사용자용 실행 안내 + 배포(Vercel + Turso) 절차
 - 원본 유저플로우: `영남대학교 화학공학부 학생을 위한 학교 공지 통합·맞춤 추천 서비스_유저플로우_2026-08-18.md`
   (n1~n58 노드 정의. §9의 대응표가 이걸 따른다)
 
 ## 12. 완성 기준
 
-- [ ] 8개 출처에서 220건 이상 수집, 전부 `SUCCESS`
+- [ ] 11개 출처에서 수집 성공(`.do` 8개 + join 3개), `.do`만으로 220건 이상
 - [ ] 재수집 시 신규 0 (멱등성)
 - [ ] 행사 게시판 게시일이 미래가 아님
 - [ ] 마감일 약 70건 수준이고 원문 대조 시 배부일·행사일이 섞이지 않음
@@ -983,6 +1086,7 @@ npx tsx src/scripts/enrich.ts --limit 5
 - [ ] 유저플로우 n1~n41 전 구간 동작
 - [ ] 관리자 n42~n58 전 구간 동작 + 인증 가드
 - [ ] 숨긴 공지가 학생 목록·상세에서 사라짐
-- [ ] 알림 중복 생성 없음
+- [ ] 알림 중복 생성 없음 + 저장 공지 마감 알림이 D-3/D-1/당일에 한 번씩만 생성됨
+- [ ] `UI.md`의 대조 체크리스트 전부 통과 (라이트·다크 양쪽)
 - [ ] `tsc` / `eslint` / `build` 통과
 - [ ] `ANTHROPIC_API_KEY` 없이도 전체 서비스가 동작
