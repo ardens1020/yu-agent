@@ -156,16 +156,45 @@ function dedupeKey(title: string): string {
     .toLowerCase();
 }
 
+/**
+ * 마감 기준 정렬용 등급. 지난 마감을 앞에 둘 수는 없고, 마감 없는 공지를
+ * 마감 있는 공지보다 앞에 둘 수도 없다.
+ *   0 = 아직 남은 마감 (임박한 순)  1 = 마감 없음  2 = 이미 지난 마감
+ */
+function deadlineTier(deadlineAt: Date | null, now: Date): number {
+  if (!deadlineAt) return 1;
+  return deadlineAt.getTime() >= now.getTime() ? 0 : 2;
+}
+
 export function rankNotices<T extends ScorableNotice>(
   notices: T[],
   user: ScorableUser,
-  { limit = 10, minScore = 20, now = new Date() } = {},
+  {
+    limit = 10,
+    minScore = 20,
+    now = new Date(),
+    sortBy = "score",
+  }: { limit?: number; minScore?: number; now?: Date; sortBy?: "score" | "deadline" } = {},
 ): Recommendation<T>[] {
+  const byScore = (a: Recommendation<T>, b: Recommendation<T>) =>
+    b.score - a.score || b.notice.publishedAt.getTime() - a.notice.publishedAt.getTime();
+
   const ranked = notices
     .map((notice) => ({ notice, ...scoreNotice(notice, user, now) }))
     .filter((r) => r.score >= minScore)
     .sort(
-      (a, b) => b.score - a.score || b.notice.publishedAt.getTime() - a.notice.publishedAt.getTime(),
+      sortBy === "score"
+        ? byScore
+        : (a, b) => {
+            const tier = deadlineTier(a.notice.deadlineAt, now) - deadlineTier(b.notice.deadlineAt, now);
+            if (tier !== 0) return tier;
+            // 같은 등급 안에서 마감이 있으면 빠른 순, 없으면 기존 점수 순서를 따른다.
+            if (a.notice.deadlineAt && b.notice.deadlineAt) {
+              const diff = a.notice.deadlineAt.getTime() - b.notice.deadlineAt.getTime();
+              if (diff !== 0) return diff;
+            }
+            return byScore(a, b);
+          },
     );
 
   const seen = new Set<string>();

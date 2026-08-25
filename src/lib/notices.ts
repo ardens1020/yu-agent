@@ -143,7 +143,8 @@ export async function recommendNotices(
   const ranked: Recommendation<(typeof scorables)[number]["scorable"]>[] = rankNotices(
     scorables.map((s) => s.scorable),
     user,
-    { limit, minScore: 20 },
+    // 맞춤 공지는 마감이 임박한 순으로 보여준다 (마감 없는 것, 지난 것 순으로 뒤에).
+    { limit, minScore: 20, sortBy: "deadline" },
   );
 
   const byId = new Map(scorables.map((s) => [s.raw.id, s.raw]));
